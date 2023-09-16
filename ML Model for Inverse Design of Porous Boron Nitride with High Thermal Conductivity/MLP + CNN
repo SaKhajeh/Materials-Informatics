@@ -1,0 +1,241 @@
+import cv2
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import LabelBinarizer
+
+import os
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input
+from tensorflow.keras.layers import Conv2D, MaxPooling2D
+from tensorflow.keras.layers import Activation, Dense, Flatten, Dropout
+from tensorflow.keras.layers import BatchNormalization
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import concatenate
+
+import pandas as pd
+import matplotlib.pyplot as plt
+
+inputPath = r"D:\Work\Salman\1024\MainData.xlsx"
+datasetPath = r"D:\Work\Salman\1024\Pictures"
+
+meanval = []
+stdval = []
+    
+df = pd.read_excel(inputPath)
+
+''' holes, counts = np.unique(df["hole"], return_counts=True)
+
+# loop over each of the unique holes and their corresponding count
+
+for (hole, count) in zip(holes, counts):
+
+    if count < 20:
+        idxs = df[df["hole"] == hole].index
+        df.drop(idxs, inplace=True)
+'''
+
+images = []
+
+for img in os.listdir(datasetPath):
+    imagepath = os.path.sep.join([datasetPath, img])
+    image = cv2.imread(imagepath)
+    images.append(image)
+
+#plt.imshow(images[37][...,::-1])
+
+
+images = np.array(images)
+
+images = images / 255.0
+
+
+# partition the data into training and testing splits using 75% of
+# the data for training and the remaining 25% for testing
+split = train_test_split(df, images, test_size=0.2, random_state=42)
+(trainAttrX,varAttrX, trainImagesX, varImagesX) = split
+
+# find the largest kappa in the training set and use it to
+# scale our data to the range [0, 1] (will lead to better training and convergence)
+maxkAPA = trainAttrX["KAPA"].max()
+trainY = trainAttrX["KAPA"] / maxkAPA
+varY = varAttrX["KAPA"] / maxkAPA
+
+# initialize the column names of the continuous data
+continuous = ["HOLE"]
+
+# performin min-max scaling each continuous feature column to
+# the range [0, 1]
+cs = MinMaxScaler()
+trainContinuous = cs.fit_transform(trainAttrX[continuous])
+varContinuous = cs.transform(varAttrX[continuous])
+
+trainContinuous = trainAttrX[continuous]
+varContinuous = varAttrX[continuous]
+
+'''
+# one-hot encode the KAPA categorical data (by definition of
+# one-hot encoing, all output features are now in the range [0, 1])
+RBinarizerR1 = LabelBinarizer().fit(df["R1"])
+trainCategoricalR1 = RBinarizerR1.transform(trainAttrX["R1"])
+varCategoricalR1 =RBinarizerR1.transform(varAttrX["R1"])
+
+RBinarizerR2 = LabelBinarizer().fit(df["R2"])
+trainCategoricalR2 = RBinarizerR2.transform(trainAttrX["R2"])
+varCategoricalR2 =RBinarizerR2.transform(varAttrX["R2"])
+
+RBinarizerR3 = LabelBinarizer().fit(df["R3"])
+trainCategoricalR3 = RBinarizerR3.transform(trainAttrX["R3"])
+varCategoricalR3 =RBinarizerR3.transform(varAttrX["R3"])
+'''
+
+R1 = np.array(trainAttrX["R1"])
+R2 = np.array(trainAttrX["R2"])
+R3 = np.array(trainAttrX["R3"])
+R4 = np.array(trainAttrX["R4"])
+R5 = np.array(trainAttrX["R5"])
+
+R = np.stack([R1, R2, R3, R4, R5])
+Rtrain = np.transpose(R, axes=None)
+
+R1 = np.array(varAttrX["R1"])
+R2 = np.array(varAttrX["R2"])
+R3 = np.array(varAttrX["R3"])
+R4 = np.array(varAttrX["R4"])
+R5 = np.array(varAttrX["R5"])
+
+R = np.stack([R1, R2, R3, R4, R5])
+Rvar = np.transpose(R, axes=None)
+
+# construct our training and testing data points by concatenating
+# the categorical features with the continuous features
+trainAttrX = np.hstack([Rtrain, trainContinuous])
+varAttrX = np.hstack([Rvar, varContinuous])
+
+dim = trainAttrX.shape[1] #10
+
+for c in range(1):
+    # define our MLP network
+    mlp = Sequential()
+    mlp.add(Dense(8, input_dim=dim, activation="relu"))
+    mlp.add(Dense(4, activation="relu"))
+    
+    width, height, depth = 384, 120, 3
+    filters=(16, 32, 64, 128)
+    # initialize the input shape and channel dimension, assuming
+    # TensorFlow/channels-last ordering
+    inputShape = (height, width, depth)
+    chanDim = -1
+    
+    # define the model input
+    inputs = Input(shape=inputShape)
+    
+    # loop over the number of filters
+    for (i, f) in enumerate(filters):
+        # if this is the first CONV layer then set the input
+        # appropriately
+        if i == 0:
+            x = inputs
+    
+        # CONV => RELU => BN => POOL
+        x = Conv2D(f, (3, 3), padding="same")(x)
+        x = Activation("relu")(x)
+        x = BatchNormalization(axis=chanDim)(x)
+        x = MaxPooling2D(pool_size=(2, 2))(x)
+        
+    # flatten the volume, then FC => RELU => BN => DROPOUT
+    x = Flatten()(x)
+    x = Dense(16)(x)
+    x = Activation("relu")(x)
+    x = BatchNormalization(axis=chanDim)(x)
+    x = Dropout(0.5)(x)
+    
+    # apply another FC layer, this one to match the number of nodes
+    # coming out of the MLP
+    x = Dense(4)(x)
+    x = Activation("relu")(x)
+    
+    mlp.summary()
+    
+    # construct the CNN
+    cnn = Model(inputs, x)
+    
+    # create the input to our final set of layers as the *output* of both
+    # the MLP and CNN
+    combinedInput = concatenate([mlp.output, cnn.output])
+    
+    # our final FC layer head will have two dense layers, the final one
+    # being our regression head
+    
+    FC = 16
+    
+    x = Dense(FC, activation="relu")(combinedInput)
+    x = Dense(1, activation="linear")(x)
+    
+    model = Model(inputs=[mlp.input, cnn.input], outputs=x)
+    
+    opt = Adam(lr=1e-3, decay=1e-3 / 200)
+    model.compile(loss="mean_absolute_percentage_error", optimizer=opt)
+     
+    
+    # train the model
+    history = model.fit(
+        [trainAttrX, trainImagesX], trainY,
+        validation_data=([varAttrX, varImagesX], varY),
+        epochs=200, batch_size=16)
+    
+    # make predictions on the testing data
+    preds = model.predict([varAttrX, varImagesX])
+    
+    # compute the difference between the *predicted* KAPA and the
+    # *actual* KAPA, then compute the percentage difference and
+    # the absolute percentage difference
+    diff = preds.flatten() - varY
+    percentDiff = (diff / varY) * 100
+    absPercentDiff = np.abs(percentDiff)
+     
+    # compute the mean and standard deviation of the absolute percentage
+    # difference
+    mean = np.mean(absPercentDiff)
+    std = np.std(absPercentDiff)
+    
+    
+    meanval.append(mean)
+    stdval.append(std)
+    # finally, show some statistics on our model
+    print("[INFO] KAPA.mean: {:.2f}%, KAPA.std: {:.2f}%".format(mean, std))
+    
+
+    
+    model.save('KAPA_1to20.h5')
+    
+    print(history.history.keys())
+   
+    # list all data in history
+    print(history.history.keys())
+    # summarize history for accuracy
+'''    plt.plot(history.history['accuracy'])
+    plt.plot(history.history['val_accuracy'])
+    plt.title('model accuracy')
+    plt.ylabel('accuracy')
+    plt.xlabel('epoch')
+    plt.legend(['train', 'test'], loc='upper left')
+    plt.show()
+'''    
+
+
+f = plt.gcf()
+    # summarize history for loss
+plt.plot(history.history['loss'])
+plt.plot(history.history['val_loss'])
+    # plt.title('model loss (FC = 4096) ')
+plt.ylabel('loss')
+plt.xlabel('epoch')
+plt.legend(['train', 'test'], loc='upper left')
+plt.grid(color = 'green', linestyle = '--', linewidth = 0.5)
+    
+    
+    #plt.show()
+    
+f.savefig(str(c+1)+".jpg", dpi = 300)
