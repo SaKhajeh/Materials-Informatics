@@ -1,0 +1,112 @@
+from tensorflow.keras import layers
+from tensorflow.keras import models
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.optimizers import RMSprop
+import matplotlib.pyplot as plt
+from tensorflow.keras.optimizers import Adam
+
+from sklearn.metrics import mean_squared_error
+from sklearn.metrics import r2_score 
+import math
+
+import os
+import pandas as pd
+import cv2
+import numpy as np
+
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import LabelBinarizer
+from sklearn.metrics import mean_squared_error
+
+datasetPath = r"D:\Work\Salman\1024\Pictures"
+inputPath = r"D:\Work\Salman\1024\MainData.xlsx"
+
+df = pd.read_excel(inputPath)
+
+#df.head()
+#df.shape
+    
+images = []
+
+for img in os.listdir(datasetPath):
+    imagepath = os.path.sep.join([datasetPath, img])
+    image = cv2.imread(imagepath)
+    images.append(image)
+
+#plt.imshow(images[37][...,::-1])
+
+images = np.array(images)
+
+# partition the data into training and testing splits using 75% of
+# the data for training and the remaining 25% for testing
+split = train_test_split(df["KAPA"], images, test_size=0.25, random_state=42)
+(KTr, KTe, ImTr, ImTe) = split#print(train.shape)
+#print(test.shape)
+
+maxKapa = KTr.max()
+KTrN = KTr / maxKapa
+KTeN = KTe / maxKapa
+
+model = models.Sequential()
+
+model.add(layers.Conv2D(32, (3, 3), activation='relu', input_shape=(120, 384, 3)))
+model.add(layers.MaxPooling2D((2, 2)))
+
+model.add(layers.Conv2D(64, (3, 3), activation='relu'))
+model.add(layers.MaxPooling2D((2, 2)))
+
+model.add(layers.Conv2D(128, (3, 3), activation='relu'))
+model.add(layers.MaxPooling2D((2, 2)))
+
+model.add(layers.Conv2D(128, (3, 3), activation='relu'))
+model.add(layers.MaxPooling2D((2, 2)))
+
+model.add(layers.Flatten())
+model.add(layers.Dropout(0.5))
+
+model.add(layers.Dense(1024, activation='relu'))
+model.add(layers.Dense(1, activation='linear'))
+
+model.summary()
+
+opt = Adam(lr=1e-3, decay=1e-3 / 200)
+model.compile(loss="mean_absolute_percentage_error", optimizer=opt)
+
+# train the model
+H = model.fit(
+    ImTr, KTrN,
+    validation_data=(ImTe, KTeN),
+    epochs = 100, batch_size= 16)
+    
+# make predictions on the testing data
+preds = model.predict(ImTe)
+
+MSE = mean_squared_error(KTr, preds)
+RMSE = math.sqrt(MSE)
+print("Root Mean Square Error:\n")
+print(RMSE)
+
+R_square = r2_score(KTr, preds) 
+print("R^2:\n")
+print(R_square)
+    
+#model.save('KAPA_1to20.h5')
+    
+print(H.history.keys())
+   
+# list all data in history
+print(H.history.keys())
+# summarize history for accuracy
+f = plt.gcf()
+# summarize history for loss
+plt.plot(H.history['loss'])
+plt.plot(H.history['val_loss'])
+# plt.title('model loss (FC = 4096) ')
+plt.ylabel('loss')
+plt.xlabel('epoch')
+plt.legend(['train', 'test'], loc='upper left')
+plt.grid(color = 'green', linestyle = '--', linewidth = 0.5)
+#plt.show()
+
+plot_model(cnn,  to_file='model_plot.png',  show_shapes=True, show_layer_names=True)
