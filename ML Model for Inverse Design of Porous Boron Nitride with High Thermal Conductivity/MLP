@@ -1,0 +1,126 @@
+# 1. Import libraries and modules
+import tensorflow.keras
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.layers import Dense,  Activation
+import numpy as np
+from keras.utils import np_utils
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import mean_squared_error
+from sklearn.metrics import r2_score 
+import math
+import matplotlib.pyplot as plt
+
+
+import os
+import pandas as pd
+
+np.random.seed(123)  # for reproducibility
+
+
+# 2. Load pre-shuffled HODA data into train and test sets
+
+inputPath = r"D:\Work\Salman\1024\MainData.xlsx"
+
+cols = [""]
+
+df = pd.read_excel(inputPath)
+df.head()
+
+# partition the data into training and testing splits using 75% of
+# the data for training and the remaining 25% for testing
+split = train_test_split(df, test_size=0.2, random_state=42)
+(Tr, Te) = split
+
+# find the largest kappa in the training set and use it to
+# scale our data to the range [0, 1] (will lead to better training and convergence)
+maxkAPA = Tr["KAPA"].max()
+TrL = Tr["KAPA"] / maxkAPA
+TeL = Te["KAPA"] / maxkAPA
+
+# initialize the column names of the continuous data
+continuous = ["HOLE"]
+
+# performin min-max scaling each continuous feature column to
+# the range [0, 1]
+cs = MinMaxScaler()
+TrC = cs.fit_transform(Tr[continuous])
+TeC = cs.transform(Te[continuous])
+
+R1 = np.array(Tr["R1"])
+R2 = np.array(Tr["R2"])
+R3 = np.array(Tr["R3"])
+R4 = np.array(Tr["R4"])
+R5 = np.array(Tr["R5"])
+
+R = np.stack([R1, R2, R3, R4, R5])
+RTr = np.transpose(R, axes=None)
+
+R1 = np.array(Te["R1"])
+R2 = np.array(Te["R2"])
+R3 = np.array(Te["R3"])
+R4 = np.array(Te["R4"])
+R5 = np.array(Te["R5"])
+
+R = np.stack([R1, R2, R3, R4, R5])
+RTe = np.transpose(R, axes=None)
+
+# construct our training and testing data points by concatenating
+# the categorical features with the continuous features
+Tr = np.hstack([RTr, TrC])
+Te = np.hstack([RTe, TeC])
+
+dim = Tr.shape[1]
+
+# Preprocess input data for Keras. 
+# 3. Preprocess input data
+''' 3.1: input data in numpy array format'''
+
+TrNP = np.array(Tr)
+TeNP = np.array(Te)
+
+# 4. Define model architecture
+
+model = Sequential()
+model.add(Dense(16, activation='relu', input_dim=dim))
+model.add(Dense(8, activation='relu'))
+model.add(Dense(4, activation='relu'))
+model.add(Dense(1, activation='linear'))
+
+model.summary()
+
+# 6. Compile model
+
+opt = Adam(lr=1e-3, decay=1e-3 / 200)
+model.compile(loss="mean_absolute_percentage_error", optimizer=opt)
+
+# 7. Fit model on training data
+
+history = model.fit(TrNP, TrL, epochs=100,
+          batch_size=64, validation_split=0.2)
+
+# 8. Evaluate model on test data
+preds = model.predict(TeNP)
+
+f = plt.gcf()
+    # summarize history for loss
+plt.plot(history.history['loss'])
+plt.plot(history.history['val_loss'])
+    # plt.title('model loss (FC = 4096) ')
+plt.ylabel('loss')
+plt.xlabel('epoch')
+plt.legend(['train', 'test'], loc='upper left')
+plt.grid(color = 'green', linestyle = '--', linewidth = 0.5)
+f.savefig("MLP"+".jpg", dpi = 300)
+    
+#plt.show()
+    
+MSE = mean_squared_error(TeL, preds)
+RMSE = math.sqrt(MSE)
+print("Root Mean Square Error:\n")
+print(RMSE)
+
+R_square = r2_score(TeL, preds) 
+print("R^2:\n")
+print(R_square)
